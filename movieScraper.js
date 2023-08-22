@@ -39,8 +39,8 @@ const scrapeScreenshots = (content, $) => {
   const screenshotHeadingsSelector = [
     "h2:contains('Screenshots: (Must See Before Downloading)…')",
     "h4:contains(': SCREENSHOTS :')",
-    "h2:contains('Screenshots: (Must See Before Downloading)')"
-  ].join(', ');
+    "h2:contains('Screenshots: (Must See Before Downloading)')",
+  ].join(", ");
 
   const screenshotHeadings = content.find(screenshotHeadingsSelector);
   screenshotHeadings.each((_, heading) => {
@@ -69,7 +69,6 @@ const extractCreatorInfo = ($, content, variations) => {
 
   return null;
 };
-
 
 // Function to format URLs with root URL
 const formatUrlWithRoot = (url, rootUrl) => {
@@ -110,7 +109,11 @@ const fetchMovieDetails = async (url) => {
 
     const rootUrl = url.match(/^(https?:\/\/[^/]+)/)?.[1] || null;
     const featureImageElement = $(".single-feature-image img");
-    const featureImage = extractAndFormatImageUrls($, featureImageElement, rootUrl);
+    const featureImage = extractAndFormatImageUrls(
+      $,
+      featureImageElement,
+      rootUrl
+    );
 
     const description1 = $(".entry-content p").eq(0).text();
     const description2 = $(".entry-content p").eq(1).text();
@@ -151,7 +154,8 @@ const fetchMovieDetails = async (url) => {
         return (
           text.includes("series synopsis/plot") ||
           text.includes("series-synopsis/plot") ||
-          (!isSeason && text.includes("movie-synopsis/plot") || text.includes("movie synopsis/plot"))
+          (!isSeason && text.includes("movie-synopsis/plot")) ||
+          text.includes("movie synopsis/plot")
         );
       })
       .next("p");
@@ -167,7 +171,11 @@ const fetchMovieDetails = async (url) => {
         ?.trim() || null;
 
     // Define variations for creator information
-    const creatorVariations = ["Created By", "Created And Directed By"];
+    const creatorVariations = [
+      "Created By",
+      "Created And Directed By",
+      "Directed By",
+    ];
     const createdBy = extractCreatorInfo($, content, creatorVariations);
 
     // const createdByElement = content.find("p:contains('Created By')").first();
@@ -206,7 +214,7 @@ const fetchMovieDetails = async (url) => {
       is_season: isSeason,
     };
 
-    console.log(data)
+    console.log(data);
     return data;
   } catch (error) {
     console.error(error);

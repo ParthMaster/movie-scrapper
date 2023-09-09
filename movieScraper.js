@@ -33,26 +33,38 @@ const getProperty = (content, ...names) => {
   return null;
 };
 
-// Function to scrape screenshots from the content
-const scrapeScreenshots = (content, $) => {
-  const screenshots = [];
-  const screenshotHeadingsSelector = [
-    "h2:contains('Screenshots: (Must See Before Downloading)…')",
-    "h4:contains(': SCREENSHOTS :')",
-    "h2:contains('Screenshots: (Must See Before Downloading)')",
-  ].join(", ");
+const scrapeScreenshots = ($, url) => {
+  try {
+    const screenshotHeadingsSelector = [
+      "h2:contains('Screenshots: (Must See Before Downloading)…')",
+      "h4:contains(': SCREENSHOTS :')",
+      "h2:contains('Screenshots: (Must See Before Downloading)')",
+    ].join(", ");
 
-  const screenshotHeadings = content.find(screenshotHeadingsSelector);
-  screenshotHeadings.each((_, heading) => {
-    const screenshotContainer = $(heading).next("p");
-    screenshotContainer.find("img").each((_, img) => {
-      const url = $(img).attr("src");
-      screenshots.push({ url });
-    });
-  });
+    const screenshotHeading = $(screenshotHeadingsSelector).first();
 
-  return screenshots;
+    const screenshotUrls = [];
+
+    if (screenshotHeading.length) {
+
+      const screenshotImages = screenshotHeading.next("p").find("img");
+
+      screenshotImages.each((_, img) => {
+        const imgUrl = $(img).attr("data-lazy-src") || $(img).attr("src");
+        if (imgUrl) {
+
+          const absoluteUrl = new URL(imgUrl, url).href;
+          screenshotUrls.push(absoluteUrl);
+        }
+      });
+    }
+
+    return screenshotUrls;
+  } catch (error) {
+    throw new Error("Error scraping screenshots: " + error.message);
+  }
 };
+
 
 const extractCreatorInfo = ($, content, variations) => {
   for (const variation of variations) {
@@ -75,10 +87,9 @@ const formatUrlWithRoot = (url, rootUrl) => {
   return url.startsWith(rootUrl) ? url : `${rootUrl}${url}`;
 };
 
-// Function to extract image URLs and format them with root URL
-const extractAndFormatImageUrls = ($, imageElement, rootUrl) => {
-  const imageSrc = imageElement.attr("src");
-  const imageSrcSet = imageElement.attr("srcset");
+const extractAndFormatImageUrls = ($, featureImageElement, rootUrl) => {
+  const imageSrc = featureImageElement.attr("src");
+  const imageSrcSet = featureImageElement.attr("srcset");
 
   const imageUrls = {
     main: formatUrlWithRoot(imageSrc, rootUrl),
@@ -89,12 +100,18 @@ const extractAndFormatImageUrls = ($, imageElement, rootUrl) => {
     const imageMatches = [...imageSrcSet.matchAll(imageRegex)];
 
     for (const [, imageUrl, width] of imageMatches) {
-      imageUrls[`size_${width}`] = formatUrlWithRoot(imageUrl, rootUrl);
+      // Check if the imageUrl starts with "//"
+      const formattedUrl = imageUrl.startsWith("//")
+        ? `https:${imageUrl}`
+        : imageUrl;
+
+      imageUrls[`size_${width}`] = formatUrlWithRoot(formattedUrl, rootUrl);
     }
   }
 
   return imageUrls;
 };
+
 
 // Function to fetch movie details from a URL
 const fetchMovieDetails = async (url) => {
@@ -109,11 +126,20 @@ const fetchMovieDetails = async (url) => {
 
     const rootUrl = url.match(/^(https?:\/\/[^/]+)/)?.[1] || null;
     const featureImageElement = $(".single-feature-image img");
-    const featureImage = extractAndFormatImageUrls(
-      $,
-      featureImageElement,
-      rootUrl
-    );
+    const noscriptElement = $(".single-feature-image noscript");
+
+    const singleFeatureImage = $(".single-feature-image");
+    const isNoscriptElement = singleFeatureImage.find("noscript");
+
+    let featureImage;
+    if (isNoscriptElement.length > 0) {
+      const noscriptHtml = noscriptElement.html();
+      const noscriptContent = cheerio.load(noscriptHtml);
+      const noscriptImageElement = noscriptContent("img");
+      featureImage = extractAndFormatImageUrls($, noscriptImageElement, rootUrl);
+    } else {
+      featureImage = extractAndFormatImageUrls($, featureImageElement, rootUrl);
+    }
 
     const description1 = $(".entry-content p").eq(0).text();
     const description2 = $(".entry-content p").eq(1).text();
@@ -178,14 +204,7 @@ const fetchMovieDetails = async (url) => {
     ];
     const createdBy = extractCreatorInfo($, content, creatorVariations);
 
-    // const createdByElement = content.find("p:contains('Created By')").first();
-    // const createdBy =
-    //     createdByElement
-    //         .text()
-    //         .match(/Created By\s*:\s*(.*)/i)?.[1]
-    //         ?.trim() || null;
-
-    const screenshots = scrapeScreenshots(content, $);
+    const screenshots = scrapeScreenshots($, url);
 
     const data = {
       title,

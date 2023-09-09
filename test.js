@@ -33,52 +33,26 @@ const getProperty = (content, ...names) => {
   return null;
 };
 
-// Function to scrape screenshots from the content
-// const scrapeScreenshots = (content, $) => {
-//   const screenshots = [];
-//   const screenshotHeadingsSelector = [
-//     "h2:contains('Screenshots: (Must See Before Downloading)…')",
-//     "h4:contains(': SCREENSHOTS :')",
-//     "h2:contains('Screenshots: (Must See Before Downloading)')",
-//   ].join(", ");
-
-//   const screenshotHeadings = content.find(screenshotHeadingsSelector);
-//   screenshotHeadings.each((_, heading) => {
-//     const screenshotContainer = $(heading).next("p");
-//     screenshotContainer.find("img").each((_, img) => {
-//       const url = $(img).attr("src");
-//       screenshots.push({ url });
-//     });
-//   });
-
-//   return screenshots;
-// };
-
-const scrapeScreenshots = async ($, url) => {
+const scrapeScreenshots = ($, url) => {
   try {
-    // Define possible heading selectors
     const screenshotHeadingsSelector = [
       "h2:contains('Screenshots: (Must See Before Downloading)…')",
       "h4:contains(': SCREENSHOTS :')",
       "h2:contains('Screenshots: (Must See Before Downloading)')",
     ].join(", ");
 
-    // Find the first matching heading
     const screenshotHeading = $(screenshotHeadingsSelector).first();
 
-    // Initialize an array to store the image URLs
     const screenshotUrls = [];
 
-    // Check if the screenshotHeading was found
     if (screenshotHeading.length) {
-      // Find all img tags within the parent p tag of the h2
+
       const screenshotImages = screenshotHeading.next("p").find("img");
 
-      // Iterate over the images and extract their source URLs
       screenshotImages.each((_, img) => {
-        const imgUrl = $(img).attr("data-lazy-src");
+        const imgUrl = $(img).attr("data-lazy-src") || $(img).attr("src");
         if (imgUrl) {
-          // Convert the relative URL to absolute URL
+
           const absoluteUrl = new URL(imgUrl, url).href;
           screenshotUrls.push(absoluteUrl);
         }
@@ -90,6 +64,7 @@ const scrapeScreenshots = async ($, url) => {
     throw new Error("Error scraping screenshots: " + error.message);
   }
 };
+
 
 const extractCreatorInfo = ($, content, variations) => {
   for (const variation of variations) {
@@ -112,67 +87,29 @@ const formatUrlWithRoot = (url, rootUrl) => {
   return url.startsWith(rootUrl) ? url : `${rootUrl}${url}`;
 };
 
-function addHttps(url) {
-  if (url.startsWith("//")) {
-    return `https:${url}`;
+const extractAndFormatImageUrls = ($, featureImageElement, rootUrl) => {
+  const imageSrc = featureImageElement.attr("src");
+  const imageSrcSet = featureImageElement.attr("srcset");
+
+  const imageUrls = {
+    main: formatUrlWithRoot(imageSrc, rootUrl),
+  };
+
+  if (imageSrcSet) {
+    const imageRegex = /([^ ]+)\s+(\d+w)/g;
+    const imageMatches = [...imageSrcSet.matchAll(imageRegex)];
+
+    for (const [, imageUrl, width] of imageMatches) {
+      // Check if the imageUrl starts with "//"
+      const formattedUrl = imageUrl.startsWith("//")
+        ? `https:${imageUrl}`
+        : imageUrl;
+
+      imageUrls[`size_${width}`] = formatUrlWithRoot(formattedUrl, rootUrl);
+    }
   }
-  return url;
-}
 
-// Function to extract image URLs and format them with root URL
-const extractAndFormatImageUrls = ($) => {
-  try {
-    // Find the noscript tag within the .single-feature-image div
-    const noscriptTag = $(".single-feature-image noscript");
-
-    // Extract the HTML content within the noscript tag
-    const noscriptHtml = noscriptTag.html();
-
-    // Create a new Cheerio instance for the content within the noscript tag
-    const noscriptContent = cheerio.load(noscriptHtml);
-
-    // Find the image element within the noscript content
-    const imageElement = noscriptContent("img");
-
-    // Extract the src attribute from the image element
-    let main = imageElement.attr("src");
-
-    // Extract the srcset attribute from the image element
-    const srcset = imageElement.attr("srcset");
-
-    // Split the srcset into individual URLs and sizes
-    const srcsetUrls = srcset
-      ? srcset.split(',').map(item => {
-        const parts = item.trim().split(' ');
-        return {
-          url: parts[0],
-          size: parts[1].replace(/[^\d]/g, ""), // Extract the size (e.g., "300w" -> "300")
-        };
-      })
-      : [];
-
-    // Add "https://" before URLs that start with "//"
-    main = addHttps(main);
-    const formattedSrcsetUrls = srcsetUrls.map(({ url, size }) => ({
-      size: size + "w",
-      url: addHttps(url),
-    }));
-
-    // Build the featureImage object
-    const featureImage = {
-      main: main || "",
-    };
-
-    // Create size_XXXw keys for each srcset URL
-    formattedSrcsetUrls.forEach(({ size, url }) => {
-      featureImage[`size_${size}`] = url || "";
-    });
-
-    return featureImage;
-  } catch (error) {
-    console.error("Error fetching URL:", error);
-    return {};
-  }
+  return imageUrls;
 };
 
 
@@ -189,11 +126,20 @@ const fetchMovieDetails = async (url) => {
 
     const rootUrl = url.match(/^(https?:\/\/[^/]+)/)?.[1] || null;
     const featureImageElement = $(".single-feature-image img");
-    const featureImage = await extractAndFormatImageUrls(
-      $,
-      featureImageElement,
-      rootUrl
-    );
+    const noscriptElement = $(".single-feature-image noscript");
+
+    const singleFeatureImage = $(".single-feature-image");
+    const isNoscriptElement = singleFeatureImage.find("noscript");
+
+    let featureImage;
+    if (isNoscriptElement.length > 0) {
+      const noscriptHtml = noscriptElement.html();
+      const noscriptContent = cheerio.load(noscriptHtml);
+      const noscriptImageElement = noscriptContent("img");
+      featureImage = extractAndFormatImageUrls($, noscriptImageElement, rootUrl);
+    } else {
+      featureImage = extractAndFormatImageUrls($, featureImageElement, rootUrl);
+    }
 
     const description1 = $(".entry-content p").eq(0).text();
     const description2 = $(".entry-content p").eq(1).text();
@@ -258,13 +204,6 @@ const fetchMovieDetails = async (url) => {
     ];
     const createdBy = extractCreatorInfo($, content, creatorVariations);
 
-    // const createdByElement = content.find("p:contains('Created By')").first();
-    // const createdBy =
-    //     createdByElement
-    //         .text()
-    //         .match(/Created By\s*:\s*(.*)/i)?.[1]
-    //         ?.trim() || null;
-
     const screenshots = scrapeScreenshots($, url);
 
     const data = {
@@ -305,5 +244,5 @@ const fetchMovieDetails = async (url) => {
 module.exports = { fetchMovieDetails };
 
 fetchMovieDetails(
-  "https://vegamovies.im/download-breaking-bad-season-2-complete-hindi-dubbed-org-480p-720p-1080p-web-dl/"
+  "https://vegamovies.im/download-heart-of-stone-2023-nf-dual-audio-hindi-web-dl-480p-720p-1080p/"
 );
